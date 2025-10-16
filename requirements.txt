@@ -1,0 +1,19 @@
+# Python GUI Application for Magic Mirror
+# Core dependencies
+
+# For GUI framework - using Tkinter (built-in) for simplicity
+# If you prefer PyQt5, uncomment the following:
+# PyQt5>=5.15.0
+
+# For video streaming and camera handling
+opencv-python>=4.8.1.78
+Pillow>=10.2.0
+
+# For networking and communication with Raspberry Pi
+requests>=2.31.0
+
+# For configuration management
+pyyaml>=6.0
+
+# For logging
+python-dateutil>=2.8.2
