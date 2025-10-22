@@ -1,6 +1,6 @@
 """
 Camera Stream Manager for Magic Mirror Application
-Handles audio and video relay from Raspberry Pi web camera
+Handles USB webcam video streaming and display
 """
 
 import tkinter as tk
@@ -13,7 +13,7 @@ import config
 
 
 class CameraStreamManager:
-    """Manages camera stream display and audio/video relay"""
+    """Manages USB camera stream display and video capture"""
     
     def __init__(self, parent_frame: tk.Frame):
         """
@@ -27,6 +27,25 @@ class CameraStreamManager:
         self.video_capture = None
         self.current_frame = None
         self.stream_thread = None
+        self.current_camera_index = config.DEFAULT_CAMERA_INDEX
+        
+        # TODO: Add Motion Detection Integration
+        # - Motion detection state tracking (active/idle)
+        # - Motion indicator boolean for GUI display (green = motion, gray = no motion)
+        # - Motion bounding box overlay on video stream
+        # - Confidence score display for motion detection
+        self.motion_detected = False
+        self.motion_boxes = []
+        self.motion_confidence = 0.0
+        
+        # TODO: Add Dual-Rate Streaming Support
+        # - High FPS capture for motion detection (30-60 FPS)
+        # - Low FPS display for GUI efficiency (10-15 FPS)
+        # - Separate processing threads for motion vs display
+        # - Frame rate adaptation based on system performance
+        self.motion_detection_thread = None
+        self.gui_display_fps = 15  # Lower FPS for GUI display
+        self.motion_detection_fps = 30  # Higher FPS for motion detection
         
         # Create camera stream UI
         self._create_ui()
@@ -66,6 +85,12 @@ class CameraStreamManager:
         
         # Stream info
         self._create_stream_info(stream_container)
+        
+        # TODO: Add Motion Detection Indicator
+        # - Create motion indicator widget (green/gray boolean display)
+        # - Add motion confidence meter/progress bar
+        # - Display current motion bounding box count
+        # - Show last motion detection timestamp
     
     def _create_stream_controls(self, parent: tk.Frame):
         """Create stream control buttons"""
@@ -137,7 +162,7 @@ class CameraStreamManager:
         
         tk.Label(
             url_frame,
-            text="Stream URL:",
+            text="Camera Source:",
             font=("Arial", 9, "bold"),
             bg="#34495e",
             fg="white"
@@ -145,7 +170,7 @@ class CameraStreamManager:
         
         self.url_label = tk.Label(
             url_frame,
-            text=config.CAMERA_STREAM_URL,
+            text=f"USB Camera {self.current_camera_index}",
             font=("Arial", 9),
             bg="#34495e",
             fg="#bdc3c7"
@@ -193,6 +218,29 @@ class CameraStreamManager:
             fg="#bdc3c7"
         )
         self.resolution_label.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # TODO: Add Motion Detection Status Display
+        # Motion indicator
+        motion_frame = tk.Frame(info_frame, bg="#34495e")
+        motion_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Label(
+            motion_frame,
+            text="Motion Status:",
+            font=("Arial", 9, "bold"),
+            bg="#34495e",
+            fg="white"
+        ).pack(side=tk.LEFT)
+        
+        # TODO: Implement motion indicator boolean (green for motion, gray for no motion)
+        self.motion_indicator = tk.Label(
+            motion_frame,
+            text="● No Motion",
+            font=("Arial", 9, "bold"),
+            bg="#34495e",
+            fg="#95a5a6"  # Gray for no motion, will be green for motion
+        )
+        self.motion_indicator.pack(side=tk.LEFT, padx=(10, 0))
     
     def _display_placeholder(self):
         """Display a placeholder image when stream is not active"""
@@ -225,7 +273,7 @@ class CameraStreamManager:
         # Text
         self.video_canvas.create_text(
             center_x, center_y + icon_size,
-            text="Camera Stream Offline",
+            text="USB Camera Offline",
             font=("Arial", 14, "bold"),
             fill="#7f8c8d"
         )
@@ -256,19 +304,35 @@ class CameraStreamManager:
     def _stream_loop(self):
         """Main stream processing loop (runs in separate thread)"""
         try:
-            # Try to open camera stream
-            # In production, this would connect to the Raspberry Pi camera
-            # For now, we'll try to open default camera or use placeholder
-            self.video_capture = cv2.VideoCapture(0)  # Try default camera
+            # Try to open USB camera
+            print(f"[Camera Stream] Attempting to open USB camera {self.current_camera_index}")
+            self.video_capture = cv2.VideoCapture(self.current_camera_index)
             
             if not self.video_capture.isOpened():
-                print("[Camera Stream] Could not open camera, using placeholder")
-                self.stream_status_label.config(text="Camera Unavailable", fg="#e74c3c")
-                self._display_placeholder()
-                return
+                print("[Camera Stream] Could not open USB camera, trying alternative indices...")
+                # Try other camera indices
+                for i in range(4):
+                    if i != self.current_camera_index:
+                        test_capture = cv2.VideoCapture(i)
+                        if test_capture.isOpened():
+                            test_capture.release()
+                            self.current_camera_index = i
+                            self.video_capture = cv2.VideoCapture(i)
+                            print(f"[Camera Stream] Found camera at index {i}")
+                            break
+                        test_capture.release()
+                
+                if not self.video_capture.isOpened():
+                    print("[Camera Stream] No USB cameras found")
+                    self.stream_status_label.config(text="No USB Camera Found", fg="#e74c3c")
+                    self._display_placeholder()
+                    return
+            
+            # Update camera source label
+            self.url_label.config(text=f"USB Camera {self.current_camera_index}")
             
             self.stream_status_label.config(text="Streaming", fg="#27ae60")
-            print("[Camera Stream] Stream started successfully")
+            print("[Camera Stream] USB camera stream started successfully")
             
             while self.stream_active:
                 ret, frame = self.video_capture.read()
@@ -277,8 +341,20 @@ class CameraStreamManager:
                     # Resize frame to fit canvas
                     frame = cv2.resize(frame, (config.CAMERA_WIDTH, config.CAMERA_HEIGHT))
                     
+                    # TODO: Implement Dual-Rate Processing
+                    # - Process frame at high FPS for motion detection
+                    # - Only update GUI display at lower FPS for efficiency
+                    # - Apply camera stabilization to reduce jiggle from wind
+                    # - Draw motion bounding boxes on display frame
+                    
                     # Convert from BGR to RGB
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    # TODO: Add Motion Detection Processing Here
+                    # processed_frame, motion_data = self.process_frame_for_motion(frame)
+                    # self.update_motion_status(motion_data)
+                    # if motion_data['boxes']:
+                    #     frame = self.draw_motion_boxes(frame, motion_data['boxes'])
                     
                     # Convert to PIL Image
                     image = Image.fromarray(frame)
@@ -349,6 +425,80 @@ class CameraStreamManager:
         except Exception as e:
             print(f"[Camera Stream] Error taking snapshot: {e}")
     
+    def switch_camera(self, camera_index: int):
+        """
+        Switch to a different USB camera
+        
+        Args:
+            camera_index: Index of the USB camera to switch to
+        """
+        if self.stream_active:
+            self.stop_stream()
+        
+        self.current_camera_index = camera_index
+        self.url_label.config(text=f"USB Camera {camera_index}")
+        print(f"[Camera Stream] Switched to USB camera {camera_index}")
+        
+        # Auto-start stream if it was active
+        if not self.stream_active:
+            self.start_stream()
+
+    # TODO: Add Motion Detection Methods
+    def process_frame_for_motion(self, frame):
+        """
+        Process frame for motion detection with advanced algorithms
+        
+        Args:
+            frame: Input video frame
+            
+        Returns:
+            tuple: (processed_frame, motion_data)
+                   motion_data contains: boxes, confidence, stabilized_frame
+        """
+        # TODO: Implement advanced motion detection
+        # - Background subtraction for motion detection
+        # - Camera shake compensation using optical flow
+        # - Noise filtering to reduce false positives from wind
+        # - Object tracking for persistent motion areas
+        # - Confidence scoring for motion quality
+        pass
+    
+    def update_motion_status(self, motion_data):
+        """
+        Update motion detection status in GUI
+        
+        Args:
+            motion_data: Motion detection results
+        """
+        # TODO: Update motion indicator boolean
+        # - Set motion_detected flag based on confidence threshold
+        # - Update motion_indicator label color (green/gray)
+        # - Update motion confidence display
+        # - Trigger motion notification if needed
+        pass
+    
+    def draw_motion_boxes(self, frame, motion_boxes):
+        """
+        Draw motion detection bounding boxes on frame
+        
+        Args:
+            frame: Video frame to draw on
+            motion_boxes: List of motion bounding boxes
+            
+        Returns:
+            frame: Frame with motion boxes drawn
+        """
+        # TODO: Draw bounding boxes around motion areas
+        # - Use different colors for different confidence levels
+        # - Add motion vector arrows for direction
+        # - Include timestamp and confidence text overlays
+        pass
+    
     def cleanup(self):
         """Clean up resources"""
         self.stop_stream()
+        
+        # TODO: Cleanup motion detection resources
+        # - Stop motion detection thread
+        # - Release motion detection models
+        # - Clear motion history buffers

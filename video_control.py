@@ -1,6 +1,6 @@
 """
 Video Control Manager for Magic Mirror Application
-Handles remote video selection and control for Raspberry Pi
+Handles local video source selection and USB camera control
 """
 
 import tkinter as tk
@@ -10,7 +10,7 @@ import config
 
 
 class VideoControlManager:
-    """Manages video selection and control for Raspberry Pi"""
+    """Manages video selection and control for USB cameras"""
     
     def __init__(self, parent_frame: tk.Frame, on_video_change: Optional[Callable] = None):
         """
@@ -23,7 +23,25 @@ class VideoControlManager:
         self.parent_frame = parent_frame
         self.on_video_change = on_video_change
         self.current_video = None
+        self.current_camera_index = config.DEFAULT_CAMERA_INDEX
         self.is_playing = False
+        
+        # TODO: Add Children's Content Management
+        # - Video playlist for kids content on mirror display
+        # - Content filtering and parental controls
+        # - Scheduled content playback (morning cartoons, bedtime stories)
+        # - Interactive dialog selection for different age groups
+        self.kids_playlist = []
+        self.current_kids_video = None
+        self.mirror_display_active = False
+        
+        # TODO: Add Mirror Display Control
+        # - HDMI output management for mirror display
+        # - Separate controls for camera stream vs kids content
+        # - Picture-in-picture mode for camera + content
+        # - Remote control integration for mirror interaction
+        self.hdmi_controller = None
+        self.pip_mode = False
         
         # Create video control UI
         self._create_ui()
@@ -55,6 +73,12 @@ class VideoControlManager:
         
         # Connection status
         self._create_status_display(control_frame)
+        
+        # TODO: Add Children's Content Controls
+        # - Kids video selection dropdown
+        # - Playlist management buttons
+        # - Content scheduling interface
+        # - Mirror display mode toggle
     
     def _create_video_selection(self, parent: tk.Frame):
         """Create video source selection controls"""
@@ -97,10 +121,11 @@ class VideoControlManager:
         quick_select_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
         for i, video_option in enumerate(config.VIDEO_OPTIONS[:4]):
+            camera_index = config.CAMERA_INDICES.get(video_option, i)
             btn = tk.Button(
                 quick_select_frame,
-                text=f"Cam {i+1}",
-                command=lambda v=video_option: self._select_video(v),
+                text=f"USB {camera_index}",
+                command=lambda v=video_option, idx=camera_index: self._select_video(v, idx),
                 bg="#3498db",
                 fg="white",
                 font=("Arial", 9),
@@ -235,6 +260,81 @@ class VideoControlManager:
             length=250
         )
         fps_scale.pack(padx=10, pady=(0, 10))
+        
+        # TODO: Add Children's Content Section
+        kids_content_frame = tk.LabelFrame(
+            parent,
+            text="Children's Content & Mirror Display",
+            font=("Arial", 11, "bold"),
+            bg="#34495e",
+            fg="white",
+            relief=tk.GROOVE,
+            borderwidth=2
+        )
+        kids_content_frame.pack(fill=tk.X, padx=5, pady=10)
+        
+        # TODO: Kids video selection
+        tk.Label(
+            kids_content_frame,
+            text="Kids Video Library:",
+            font=("Arial", 10),
+            bg="#34495e",
+            fg="white"
+        ).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # TODO: Implement kids video dropdown with age-appropriate content
+        self.kids_video_var = tk.StringVar(value="Select Kids Video...")
+        kids_video_options = [
+            "Morning Cartoons Playlist",
+            "Educational Videos (Ages 3-5)",
+            "Educational Videos (Ages 6-8)", 
+            "Bedtime Stories Collection",
+            "Interactive Learning Games",
+            "Custom Playlist 1"
+        ]
+        
+        kids_dropdown = ttk.Combobox(
+            kids_content_frame,
+            textvariable=self.kids_video_var,
+            values=kids_video_options,
+            state="readonly",
+            font=("Arial", 10),
+            width=30
+        )
+        kids_dropdown.pack(padx=10, pady=(0, 10), fill=tk.X)
+        
+        # TODO: Mirror display controls
+        mirror_controls_frame = tk.Frame(kids_content_frame, bg="#34495e")
+        mirror_controls_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # TODO: Implement mirror display toggle and PIP mode
+        self.mirror_display_btn = tk.Button(
+            mirror_controls_frame,
+            text="📺 Activate Mirror Display",
+            command=self._toggle_mirror_display,
+            bg="#9b59b6",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief=tk.RAISED,
+            borderwidth=2,
+            cursor="hand2",
+            width=20
+        )
+        self.mirror_display_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.pip_mode_btn = tk.Button(
+            mirror_controls_frame,
+            text="🖼️ Picture-in-Picture",
+            command=self._toggle_pip_mode,
+            bg="#e67e22",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief=tk.RAISED,
+            borderwidth=2,
+            cursor="hand2",
+            width=20
+        )
+        self.pip_mode_btn.pack(side=tk.LEFT, padx=5)
     
     def _create_status_display(self, parent: tk.Frame):
         """Create connection status display"""
@@ -249,7 +349,7 @@ class VideoControlManager:
         )
         status_frame.pack(fill=tk.X, padx=5, pady=10)
         
-        # Status indicator
+        # Connection status
         indicator_frame = tk.Frame(status_frame, bg="#34495e")
         indicator_frame.pack(fill=tk.X, padx=10, pady=10)
         
@@ -264,20 +364,20 @@ class VideoControlManager:
         
         self.status_label = tk.Label(
             indicator_frame,
-            text="Disconnected - Ready to connect",
+            text="Ready - Select USB camera to begin",
             font=("Arial", 10),
             bg="#34495e",
             fg="white"
         )
         self.status_label.pack(side=tk.LEFT)
         
-        # Raspberry Pi info
+        # USB Camera info
         info_frame = tk.Frame(status_frame, bg="#34495e")
         info_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         
         tk.Label(
             info_frame,
-            text=f"Raspberry Pi: {config.RASPI_HOST}:{config.RASPI_PORT}",
+            text=f"Current USB Camera: {config.DEFAULT_CAMERA_INDEX}",
             font=("Arial", 9),
             bg="#34495e",
             fg="#bdc3c7"
@@ -286,26 +386,31 @@ class VideoControlManager:
     def _on_video_selected(self, event):
         """Handle video selection from dropdown"""
         selected_video = self.video_var.get()
-        self._select_video(selected_video)
+        camera_index = config.CAMERA_INDICES.get(selected_video, 0)
+        self._select_video(selected_video, camera_index)
     
-    def _select_video(self, video_name: str):
+    def _select_video(self, video_name: str, camera_index: int = None):
         """
         Select a video source
         
         Args:
             video_name: Name of the video source to select
+            camera_index: USB camera index to use
         """
         self.current_video = video_name
         self.video_var.set(video_name)
         
+        if camera_index is not None:
+            self.current_camera_index = camera_index
+        
         # Update status
-        self.status_label.config(text=f"Selected: {video_name}")
+        self.status_label.config(text=f"Selected: {video_name} (USB {self.current_camera_index})")
         
         # Call callback if provided
         if self.on_video_change:
             self.on_video_change(video_name)
         
-        print(f"[Video Control] Selected video source: {video_name}")
+        print(f"[Video Control] Selected video source: {video_name} (USB Camera {self.current_camera_index})")
     
     def _toggle_playback(self):
         """Toggle play/pause state"""
@@ -332,30 +437,92 @@ class VideoControlManager:
     
     def _refresh_stream(self):
         """Refresh the video stream"""
-        self.status_label.config(text="Refreshing stream...")
-        print("[Video Control] Refreshing stream")
+        self.status_label.config(text="Refreshing USB camera stream...")
+        print("[Video Control] Refreshing USB camera stream")
         # Placeholder for actual stream refresh logic
         self.parent_frame.after(1000, lambda: self.status_label.config(
-            text=f"Stream refreshed: {self.current_video or 'No video selected'}"
+            text=f"Stream refreshed: {self.current_video or 'No camera selected'}"
         ))
     
-    def send_command_to_raspi(self, command: str, params: dict = None):
+    def get_current_camera_index(self):
+        """Get the currently selected camera index"""
+        return self.current_camera_index
+    
+    def send_camera_command(self, command: str, params: dict = None):
         """
-        Send a command to the Raspberry Pi (placeholder)
+        Send a command to control USB camera (placeholder for future expansion)
         
         Args:
             command: Command to send
             params: Command parameters
         """
-        # Placeholder for actual network communication
-        print(f"[Video Control] Sending command to Raspberry Pi: {command}")
+        # Placeholder for future USB camera control commands
+        print(f"[Video Control] USB Camera command: {command}")
         if params:
             print(f"[Video Control] Parameters: {params}")
         
-        # In real implementation, this would use requests library to communicate
-        # with the Raspberry Pi
-        # Example:
-        # import requests
-        # url = f"http://{config.RASPI_HOST}:{config.RASPI_PORT}{config.RASPI_CONTROL_ENDPOINT}"
-        # response = requests.post(url, json={"command": command, "params": params})
-        # return response.json()
+        # Future implementation could include:
+        # - Camera switching via USB hub control
+        # - PTZ camera control via USB serial
+        # - Camera settings adjustment
+    
+    # TODO: Add Children's Content Control Methods
+    def _toggle_mirror_display(self):
+        """Toggle mirror display on/off for children's content"""
+        # TODO: Implement HDMI display control
+        # - Switch HDMI output between camera feed and kids content
+        # - Manage display resolution and refresh rate
+        # - Handle display mode switching (extend/mirror/duplicate)
+        # - Control audio output routing to mirror speakers
+        self.mirror_display_active = not self.mirror_display_active
+        if self.mirror_display_active:
+            self.mirror_display_btn.config(text="📺 Deactivate Mirror Display", bg="#e74c3c")
+            print("[Video Control] Mirror display activated for kids content")
+        else:
+            self.mirror_display_btn.config(text="📺 Activate Mirror Display", bg="#9b59b6")
+            print("[Video Control] Mirror display deactivated")
+    
+    def _toggle_pip_mode(self):
+        """Toggle picture-in-picture mode (camera + kids content)"""
+        # TODO: Implement picture-in-picture functionality
+        # - Combine camera stream with kids video content
+        # - Allow repositioning and resizing of camera feed
+        # - Manage audio mixing between sources
+        # - Provide manual override controls for parents
+        self.pip_mode = not self.pip_mode
+        if self.pip_mode:
+            self.pip_mode_btn.config(text="🖼️ Exit PIP Mode", bg="#c0392b")
+            print("[Video Control] Picture-in-picture mode enabled")
+        else:
+            self.pip_mode_btn.config(text="🖼️ Picture-in-Picture", bg="#e67e22")
+            print("[Video Control] Picture-in-picture mode disabled")
+    
+    def load_kids_content_library(self):
+        """Load and organize children's video content"""
+        # TODO: Implement kids content management
+        # - Scan local video files for appropriate content
+        # - Organize by age group, category, and duration
+        # - Create playlists for different times of day
+        # - Implement content filtering based on parental settings
+        # - Support multiple video formats (MP4, AVI, MKV)
+        pass
+    
+    def create_kids_playlist(self, age_group: str, category: str):
+        """Create playlist for specific age group and category"""
+        # TODO: Implement dynamic playlist creation
+        # - Filter content by age appropriateness
+        # - Consider time of day (morning cartoons vs bedtime stories)
+        # - Allow manual playlist editing by parents
+        # - Support scheduled content playback
+        # - Include educational content progression
+        pass
+    
+    def schedule_kids_content(self, schedule: dict):
+        """Schedule children's content for specific times"""
+        # TODO: Implement content scheduling
+        # - Morning routine videos (wake up, breakfast, getting ready)
+        # - Educational content during learning hours
+        # - Quiet time/rest videos for afternoons
+        # - Bedtime stories and lullabies for evenings
+        # - Weekend special content and longer movies
+        pass

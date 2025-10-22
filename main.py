@@ -35,6 +35,22 @@ class MagicMirrorApp:
         self.video_control_manager = None
         self.camera_stream_manager = None
         
+        # TODO: Initialize Motion Detection Manager
+        # - Create MotionDetectionManager class to handle advanced motion tracking
+        # - Implement modular motion detection with configurable sensitivity
+        # - Add camera jiggle compensation using stabilization algorithms
+        # - Create motion box tracking with object detection boundaries
+        # - Support multiple simultaneous camera motion detection
+        self.motion_detection_manager = None
+        
+        # TODO: Initialize Video Processing Pipeline
+        # - Create VideoProcessingPipeline for advanced video analysis
+        # - Implement dual-rate processing (high FPS for motion, low FPS for GUI)
+        # - Add background subtraction for motion detection
+        # - Implement optical flow for motion tracking
+        # - Add noise reduction and camera shake compensation
+        self.video_processing_pipeline = None
+        
         # Create UI
         self._create_ui()
         
@@ -76,7 +92,20 @@ class MagicMirrorApp:
         tools_menu.add_command(label="Test Motion Detection", command=self._test_motion_detection)
         tools_menu.add_command(label="Clear Notifications", command=self._clear_notifications)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Connection Test", command=self._test_connection)
+        tools_menu.add_command(label="Test USB Cameras", command=self._test_usb_cameras)
+        tools_menu.add_command(label="Switch Camera", command=self._show_camera_switch_dialog)
+        
+        # TODO: Add Motion Detection Tools Menu Items
+        # - "Motion Detection Settings" for sensitivity and threshold adjustment
+        # - "Calibrate Camera Stabilization" for wind/vibration compensation setup
+        # - "Motion Detection Debug View" to show bounding boxes and detection data
+        # - "Export Motion Events" to save motion detection logs and statistics
+        
+        # TODO: Add Children's Content Menu Items
+        # - "Manage Kids Videos" to add/remove/organize children's content
+        # - "Create Video Playlist" for scheduled content on mirror display
+        # - "Mirror Display Controls" for remote control of HDMI output
+        # - "Parental Controls" for content filtering and time restrictions
         
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -103,7 +132,7 @@ class MagicMirrorApp:
         # Subtitle
         subtitle_label = tk.Label(
             header_frame,
-            text="Central Control for Raspberry Pi Camera System",
+            text="Central Control for USB Camera and HDMI Display System",
             font=("Arial", 11),
             bg="#2c3e50",
             fg="#bdc3c7"
@@ -136,6 +165,18 @@ class MagicMirrorApp:
             on_video_change=self._on_video_changed
         )
         self.camera_stream_manager = CameraStreamManager(right_panel)
+        
+        # TODO: Initialize Advanced Managers
+        # self.motion_detection_manager = MotionDetectionManager(
+        #     cameras=self.camera_stream_manager,
+        #     notification_callback=self._on_motion_detected,
+        #     motion_threshold=config.MOTION_SENSITIVITY
+        # )
+        # self.video_processing_pipeline = VideoProcessingPipeline(
+        #     stabilization_enabled=True,
+        #     noise_reduction=True,
+        #     dual_rate_processing=True
+        # )
     
     def _create_status_bar(self):
         """Create status bar at bottom of window"""
@@ -157,10 +198,10 @@ class MagicMirrorApp:
         # Connection indicator
         self.connection_indicator = tk.Label(
             status_frame,
-            text="● Raspberry Pi: Not Connected",
+            text="● USB Cameras: Ready",
             font=("Arial", 9),
             bg="#2c3e50",
-            fg="#95a5a6",
+            fg="#27ae60",
             anchor="e"
         )
         self.connection_indicator.pack(side=tk.RIGHT, padx=10)
@@ -172,12 +213,17 @@ class MagicMirrorApp:
         Args:
             video_name: Name of the selected video source
         """
-        self.status_label.config(text=f"Video source changed to: {video_name}")
-        print(f"[Main App] Video changed to: {video_name}")
+        self.status_label.config(text=f"Camera source changed to: {video_name}")
+        print(f"[Main App] Camera changed to: {video_name}")
+        
+        # Get camera index and switch camera stream
+        if self.video_control_manager and self.camera_stream_manager:
+            camera_index = self.video_control_manager.get_current_camera_index()
+            self.camera_stream_manager.switch_camera(camera_index)
         
         # Add notification about video change
         self.notification_manager.add_notification(
-            "Video Source Changed",
+            "Camera Source Changed",
             f"Now viewing: {video_name}",
             "INFO"
         )
@@ -192,6 +238,20 @@ class MagicMirrorApp:
         Check for motion detection events (placeholder)
         This would normally poll the Raspberry Pi or receive webhooks
         """
+        # TODO: Implement Real Motion Detection Processing
+        # - Integrate with motion_detection_manager for real-time analysis
+        # - Process high-FPS video stream from cameras for motion detection
+        # - Apply camera stabilization to reduce false positives from wind/vibration
+        # - Generate motion bounding boxes around detected movement
+        # - Filter out small movements below threshold to reduce noise
+        # - Send motion events to notification system with confidence scores
+        
+        # TODO: Add Motion Detection State Management
+        # - Track motion detection state per camera (active/inactive)
+        # - Implement cooldown periods to prevent spam notifications
+        # - Store recent motion events for pattern analysis
+        # - Update GUI motion indicator boolean (green/gray) in real-time
+        
         # Schedule next check
         self.root.after(config.MOTION_CHECK_INTERVAL, self._check_motion_detection)
     
@@ -210,24 +270,41 @@ class MagicMirrorApp:
             self.notification_manager.clear_all_notifications()
             self.status_label.config(text="All notifications cleared")
     
-    def _test_connection(self):
-        """Test connection to Raspberry Pi"""
-        self.status_label.config(text="Testing connection to Raspberry Pi...")
+    def _test_usb_cameras(self):
+        """Test available USB cameras"""
+        self.status_label.config(text="Testing USB cameras...")
         
-        # Placeholder for actual connection test
-        # In production, this would attempt to connect to the Raspberry Pi
-        
-        def update_status():
-            # Simulate connection test result
-            self.status_label.config(text="Connection test completed (placeholder)")
+        def test_cameras():
+            import cv2
+            available_cameras = []
+            for i in range(4):  # Test first 4 camera indices
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    available_cameras.append(i)
+                    cap.release()
+                
+            camera_list = ", ".join(str(i) for i in available_cameras) if available_cameras else "None"
+            self.status_label.config(text=f"Available USB cameras: {camera_list}")
+            
             messagebox.showinfo(
-                "Connection Test",
-                f"Connection test to {config.RASPI_HOST}:{config.RASPI_PORT}\n\n"
-                "This is a placeholder implementation.\n"
-                "In production, this would test the actual connection."
+                "USB Camera Test",
+                f"Available USB cameras at indices: {camera_list}\n\n"
+                f"Total cameras found: {len(available_cameras)}\n\n"
+                "You can select cameras using the dropdown or quick buttons."
             )
         
-        self.root.after(1000, update_status)
+        self.root.after(100, test_cameras)
+    
+    def _show_camera_switch_dialog(self):
+        """Show camera switching dialog"""
+        messagebox.showinfo(
+            "Camera Switching",
+            "To switch cameras:\n\n"
+            "1. Use the dropdown menu in Video Control Panel\n"
+            "2. Click the USB camera quick buttons\n"
+            "3. Use Tools > Test USB Cameras to see available cameras\n\n"
+            "Camera switching is automatic when you select a new source."
+        )
     
     def _show_settings(self):
         """Show settings dialog"""
@@ -235,9 +312,10 @@ class MagicMirrorApp:
             "Settings",
             "Settings dialog would appear here.\n\n"
             "Edit config.py to change application settings:\n"
-            "- Raspberry Pi connection details\n"
-            "- Camera stream URLs\n"
-            "- Video quality settings\n"
+            "- USB camera indices and mappings\n"
+            "- Camera resolution settings\n"
+            "- HDMI display configuration\n"
+            "- Motion detection sensitivity\n"
             "- Notification preferences"
         )
     
@@ -248,9 +326,9 @@ class MagicMirrorApp:
             "Magic Mirror Control Center\n\n"
             "Features:\n"
             "• Motion detection notifications\n"
-            "• Remote video selection and control\n"
-            "• Live camera stream display\n"
-            "• Audio/video relay from Raspberry Pi\n\n"
+            "• USB camera selection and control\n"
+            "• Live camera stream display via USB\n"
+            "• HDMI display output support\n\n"
             "For more information, see README.md"
         )
     
@@ -262,9 +340,29 @@ class MagicMirrorApp:
             "Version 1.0.0\n\n"
             "A Python GUI application for controlling\n"
             "Magic Mirror system with motion detection,\n"
-            "video selection, and camera streaming.\n\n"
+            "USB camera selection, and HDMI display output.\n\n"
             "© 2025 Magic Mirror Project"
         )
+    
+    # TODO: Add Motion Detection Event Handler
+    def _on_motion_detected(self, camera_id: str, motion_data: dict):
+        """
+        Handle motion detection events from cameras
+        
+        Args:
+            camera_id: ID of camera that detected motion
+            motion_data: Dictionary containing motion detection data including:
+                        - bounding_boxes: List of motion areas
+                        - confidence_score: Motion detection confidence
+                        - timestamp: When motion was detected
+                        - stabilized_frame: Camera-shake compensated frame
+        """
+        # TODO: Process motion detection data
+        # - Update motion indicator boolean in camera stream
+        # - Send notification with motion details
+        # - Log motion event for analysis
+        # - Update GUI with motion visualization
+        pass
     
     def _on_closing(self):
         """Handle application closing"""
@@ -272,6 +370,12 @@ class MagicMirrorApp:
             # Cleanup resources
             if self.camera_stream_manager:
                 self.camera_stream_manager.cleanup()
+            
+            # TODO: Cleanup Advanced Managers
+            # if self.motion_detection_manager:
+            #     self.motion_detection_manager.cleanup()
+            # if self.video_processing_pipeline:
+            #     self.video_processing_pipeline.cleanup()
             
             self.root.destroy()
             sys.exit(0)

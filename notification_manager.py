@@ -24,6 +24,24 @@ class NotificationManager:
         self.notifications: List[Dict] = []
         self.notification_widgets: List[tk.Frame] = []
         
+        # TODO: Add Advanced Motion Notification Features
+        # - Motion detection confidence scoring
+        # - Motion pattern analysis and classification
+        # - Smart notification filtering to reduce spam
+        # - Motion event clustering and summarization
+        self.motion_confidence_threshold = 0.7
+        self.notification_cooldown = {}  # Per-camera cooldown tracking
+        self.motion_patterns = {}  # Store motion patterns for analysis
+        
+        # TODO: Add Notification Enhancement Features
+        # - Rich notifications with motion thumbnails
+        # - Motion event timeline and history
+        # - Notification sound alerts with different tones
+        # - Integration with external notification services
+        self.notification_sounds = True
+        self.motion_thumbnails = []
+        self.notification_history = []
+        
         # Create notification display area
         self._create_ui()
     
@@ -75,7 +93,7 @@ class NotificationManager:
         # Add placeholder notification
         self.add_notification(
             "System Ready",
-            "Motion detection system initialized and ready",
+            "USB camera system initialized and ready",
             "INFO"
         )
     
@@ -97,8 +115,17 @@ class NotificationManager:
             "timestamp": timestamp
         }
         
+        # TODO: Add smart notification filtering
+        # - Check if similar notification was recently sent
+        # - Apply confidence threshold for motion notifications
+        # - Group related notifications to prevent spam
+        # - Prioritize notifications based on type and urgency
+        
         # Add to list
         self.notifications.append(notification_data)
+        
+        # TODO: Store in notification history for pattern analysis
+        self.notification_history.append(notification_data)
         
         # Limit number of notifications
         if len(self.notifications) > config.MAX_NOTIFICATIONS:
