@@ -10,6 +10,7 @@ import config
 from notification_manager import NotificationManager
 from video_control import VideoControlManager
 from camera_stream import CameraStreamManager
+from motion_detection import MotionDetectionManager
 
 
 class MagicMirrorApp:
@@ -94,12 +95,10 @@ class MagicMirrorApp:
         tools_menu.add_separator()
         tools_menu.add_command(label="Test USB Cameras", command=self._test_usb_cameras)
         tools_menu.add_command(label="Switch Camera", command=self._show_camera_switch_dialog)
-        
-        # TODO: Add Motion Detection Tools Menu Items
-        # - "Motion Detection Settings" for sensitivity and threshold adjustment
-        # - "Calibrate Camera Stabilization" for wind/vibration compensation setup
-        # - "Motion Detection Debug View" to show bounding boxes and detection data
-        # - "Export Motion Events" to save motion detection logs and statistics
+        tools_menu.add_separator()
+        # Motion Detection Controls
+        tools_menu.add_command(label="Motion Detection Settings", command=self._show_motion_settings)
+        tools_menu.add_command(label="Toggle Motion Detection", command=self._toggle_motion_detection)
         
         # TODO: Add Children's Content Menu Items
         # - "Manage Kids Videos" to add/remove/organize children's content
@@ -166,12 +165,18 @@ class MagicMirrorApp:
         )
         self.camera_stream_manager = CameraStreamManager(right_panel)
         
-        # TODO: Initialize Advanced Managers
-        # self.motion_detection_manager = MotionDetectionManager(
-        #     cameras=self.camera_stream_manager,
-        #     notification_callback=self._on_motion_detected,
-        #     motion_threshold=config.MOTION_SENSITIVITY
-        # )
+        # Initialize Motion Detection Manager
+        self.motion_detection_manager = MotionDetectionManager(
+            notification_callback=self._on_motion_detected
+        )
+        
+        # Connect motion detection to camera stream
+        self.camera_stream_manager.set_motion_detection_manager(self.motion_detection_manager)
+        
+        # Start motion detection
+        self.motion_detection_manager.start_detection()
+        
+        # TODO: Initialize Video Processing Pipeline
         # self.video_processing_pipeline = VideoProcessingPipeline(
         #     stabilization_enabled=True,
         #     noise_reduction=True,
@@ -344,7 +349,7 @@ class MagicMirrorApp:
             "© 2025 Magic Mirror Project"
         )
     
-    # TODO: Add Motion Detection Event Handler
+    # Motion Detection Event Handler
     def _on_motion_detected(self, camera_id: str, motion_data: dict):
         """
         Handle motion detection events from cameras
@@ -357,12 +362,146 @@ class MagicMirrorApp:
                         - timestamp: When motion was detected
                         - stabilized_frame: Camera-shake compensated frame
         """
-        # TODO: Process motion detection data
-        # - Update motion indicator boolean in camera stream
-        # - Send notification with motion details
-        # - Log motion event for analysis
-        # - Update GUI with motion visualization
-        pass
+        # Update motion indicator in camera stream
+        if self.camera_stream_manager:
+            self.camera_stream_manager.update_motion_status(motion_data)
+        
+        # Send motion notification - only when motion is first confirmed
+        if self.notification_manager and motion_data.get('confidence', 0) > 0.02:
+            motion_count = len(motion_data.get('boxes', []))
+            confidence_percent = motion_data.get('confidence', 0) * 100
+            
+            # Create user-friendly notification message
+            if motion_count == 1:
+                areas_text = "1 moving object"
+            else:
+                areas_text = f"{motion_count} moving objects"
+            
+            self.notification_manager.add_motion_notification(
+                camera_name=camera_id,
+                confidence=confidence_percent,
+                motion_areas=motion_count,
+                thumbnail_path=None
+            )
+        
+        # Update status bar with clearer language
+        motion_count = len(motion_data.get('boxes', []))
+        confidence = motion_data.get('confidence', 0)
+        
+        if motion_count == 1:
+            objects_text = "1 moving object"
+        else:
+            objects_text = f"{motion_count} moving objects"
+        
+        status_msg = f"Motion Detected! {objects_text}, Confidence: {confidence:.3f}"
+        
+        self.status_label.config(text=status_msg)
+        
+        # Log motion event
+        print(f"[Main App] Motion detected - Camera: {camera_id}, "
+              f"Confidence: {confidence:.3f}, Moving objects: {motion_count}")
+    
+    def _show_motion_settings(self):
+        """Show motion detection settings dialog"""
+        if not self.motion_detection_manager:
+            messagebox.showwarning("Motion Detection", "Motion detection is not available")
+            return
+        
+        # Create settings dialog
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Motion Detection Settings")
+        settings_window.geometry("450x400")
+        settings_window.resizable(False, False)
+        
+        # Sensitivity setting
+        tk.Label(settings_window, text="Motion Sensitivity:", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        sensitivity_var = tk.DoubleVar(value=config.MOTION_SENSITIVITY)
+        sensitivity_scale = tk.Scale(
+            settings_window,
+            from_=0.1,
+            to=0.9,
+            variable=sensitivity_var,
+            orient=tk.HORIZONTAL,
+            resolution=0.1,
+            length=350
+        )
+        sensitivity_scale.pack(pady=10)
+        
+        # Confidence threshold
+        tk.Label(settings_window, text="Confidence Threshold:", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        confidence_var = tk.DoubleVar(value=0.07)  # Use current very low threshold
+        confidence_scale = tk.Scale(
+            settings_window,
+            from_=0.1,
+            to=1.0,
+            variable=confidence_var,
+            orient=tk.HORIZONTAL,
+            resolution=0.1,
+            length=350
+        )
+        confidence_scale.pack(pady=10)
+        
+        # Human detection toggle
+        tk.Label(settings_window, text="Human Detection:", font=("Arial", 12, "bold")).pack(pady=10)
+        
+        human_detection_var = tk.BooleanVar(value=True)
+        human_detection_check = tk.Checkbutton(
+            settings_window,
+            text="Enable Human Body Detection",
+            variable=human_detection_var,
+            font=("Arial", 11)
+        )
+        human_detection_check.pack(pady=5)
+        
+        # Current status display
+        status_frame = tk.Frame(settings_window)
+        status_frame.pack(pady=15)
+        
+        status = self.motion_detection_manager.get_motion_status()
+        tk.Label(status_frame, text=f"Current FPS: {status['fps']:.1f}", 
+                font=("Arial", 10)).pack()
+        tk.Label(status_frame, text=f"Motion Active: {status['motion_detected']}", 
+                font=("Arial", 10)).pack()
+        
+        # Apply button
+        def apply_settings():
+            new_sensitivity = sensitivity_var.get()
+            new_confidence = confidence_var.get()
+            enable_human = human_detection_var.get()
+            
+            self.motion_detection_manager.update_sensitivity(new_sensitivity)
+            self.motion_detection_manager.confidence_threshold = new_confidence
+            self.motion_detection_manager.human_detection_enabled = enable_human
+            
+            config.MOTION_SENSITIVITY = new_sensitivity
+            
+            messagebox.showinfo("Settings Applied", 
+                              f"Motion detection settings updated!\n"
+                              f"Sensitivity: {new_sensitivity}\n"
+                              f"Confidence: {new_confidence}\n"
+                              f"Human Detection: {enable_human}")
+            settings_window.destroy()
+        
+        tk.Button(settings_window, text="Apply Settings", command=apply_settings, 
+                 bg="#27ae60", fg="white", font=("Arial", 12, "bold")).pack(pady=20)
+    
+    def _toggle_motion_detection(self):
+        """Toggle motion detection on/off"""
+        if not self.motion_detection_manager:
+            messagebox.showwarning("Motion Detection", "Motion detection is not available")
+            return
+        
+        status = self.motion_detection_manager.get_motion_status()
+        if status['is_active']:
+            self.motion_detection_manager.stop_detection()
+            self.status_label.config(text="Motion detection stopped")
+            messagebox.showinfo("Motion Detection", "Motion detection has been stopped")
+        else:
+            self.motion_detection_manager.start_detection()
+            self.status_label.config(text="Motion detection started")
+            messagebox.showinfo("Motion Detection", "Motion detection has been started")
     
     def _on_closing(self):
         """Handle application closing"""
@@ -371,9 +510,11 @@ class MagicMirrorApp:
             if self.camera_stream_manager:
                 self.camera_stream_manager.cleanup()
             
-            # TODO: Cleanup Advanced Managers
-            # if self.motion_detection_manager:
-            #     self.motion_detection_manager.cleanup()
+            # Cleanup Motion Detection Manager
+            if self.motion_detection_manager:
+                self.motion_detection_manager.cleanup()
+            
+            # TODO: Cleanup Video Processing Pipeline
             # if self.video_processing_pipeline:
             #     self.video_processing_pipeline.cleanup()
             

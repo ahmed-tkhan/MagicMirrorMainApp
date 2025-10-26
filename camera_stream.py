@@ -10,6 +10,8 @@ import cv2
 from typing import Optional
 import threading
 import config
+import os
+from datetime import datetime
 
 
 class CameraStreamManager:
@@ -37,6 +39,7 @@ class CameraStreamManager:
         self.motion_detected = False
         self.motion_boxes = []
         self.motion_confidence = 0.0
+        self.motion_detection_manager = None
         
         # TODO: Add Dual-Rate Streaming Support
         # - High FPS capture for motion detection (30-60 FPS)
@@ -46,6 +49,19 @@ class CameraStreamManager:
         self.motion_detection_thread = None
         self.gui_display_fps = 15  # Lower FPS for GUI display
         self.motion_detection_fps = 30  # Higher FPS for motion detection
+        self.gui_frame_counter = 0  # Counter to limit GUI updates
+        
+        # Video recording functionality
+        self.is_recording = False
+        self.video_writer = None
+        self.recording_start_time = None
+        self.recordings_folder = "recordings"
+        self.current_recording_filename = None
+        
+        # Create recordings directory if it doesn't exist
+        if not os.path.exists(self.recordings_folder):
+            os.makedirs(self.recordings_folder)
+            print(f"[Camera Stream] Created recordings folder: {self.recordings_folder}")
         
         # Create camera stream UI
         self._create_ui()
@@ -341,27 +357,35 @@ class CameraStreamManager:
                     # Resize frame to fit canvas
                     frame = cv2.resize(frame, (config.CAMERA_WIDTH, config.CAMERA_HEIGHT))
                     
-                    # TODO: Implement Dual-Rate Processing
-                    # - Process frame at high FPS for motion detection
-                    # - Only update GUI display at lower FPS for efficiency
-                    # - Apply camera stabilization to reduce jiggle from wind
-                    # - Draw motion bounding boxes on display frame
+                    # Store current frame for motion detection and recording
+                    self.current_frame = frame.copy()
                     
-                    # Convert from BGR to RGB
+                    # Process frame through motion detection if available
+                    if self.motion_detection_manager:
+                        frame, motion_data = self.motion_detection_manager.process_frame(frame)
+                        # Update motion status from detection results
+                        self.motion_detected = motion_data.get('motion_detected', False)
+                        self.motion_boxes = motion_data.get('boxes', [])
+                        self.motion_confidence = motion_data.get('confidence', 0.0)
+                        
+                        # Update motion indicator in GUI only every few frames to reduce overhead
+                        self.gui_frame_counter += 1
+                        if self.gui_frame_counter % 5 == 0:  # Update GUI every 5th frame
+                            self._update_motion_indicator()
+                    
+                    # Write frame to recording if active
+                    if self.is_recording:
+                        self._write_frame_to_recording(self.current_frame)
+                    
+                    # Convert from BGR to RGB for display
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
-                    # TODO: Add Motion Detection Processing Here
-                    # processed_frame, motion_data = self.process_frame_for_motion(frame)
-                    # self.update_motion_status(motion_data)
-                    # if motion_data['boxes']:
-                    #     frame = self.draw_motion_boxes(frame, motion_data['boxes'])
                     
                     # Convert to PIL Image
                     image = Image.fromarray(frame)
                     photo = ImageTk.PhotoImage(image=image)
                     
                     # Update canvas with new frame
-                    self.current_frame = photo
+                    display_frame = photo
                     self.video_canvas.delete("all")
                     self.video_canvas.create_image(0, 0, image=photo, anchor=tk.NW)
                     
@@ -386,6 +410,14 @@ class CameraStreamManager:
         
         print("[Camera Stream] Stopping stream...")
         self.stream_active = False
+        
+        # Stop any active recording
+        if self.is_recording:
+            self._stop_recording()
+        
+        # Unregister motion state callback
+        if self.motion_detection_manager:
+            self.motion_detection_manager.remove_motion_state_callback(self._on_motion_state_changed)
         
         # Wait for stream thread to finish
         if self.stream_thread and self.stream_thread.is_alive():
@@ -443,7 +475,156 @@ class CameraStreamManager:
         if not self.stream_active:
             self.start_stream()
 
-    # TODO: Add Motion Detection Methods
+    def set_motion_detection_manager(self, motion_manager):
+        """
+        Set the motion detection manager for this camera stream
+        
+        Args:
+            motion_manager: MotionDetectionManager instance
+        """
+        self.motion_detection_manager = motion_manager
+        print("[Camera Stream] Motion detection manager connected")
+        
+        # Register for motion state change notifications to handle recording
+        if self.motion_detection_manager:
+            self.motion_detection_manager.add_motion_state_callback(self._on_motion_state_changed)
+            print("[Camera Stream] Registered for motion state change callbacks")
+    
+    def _on_motion_state_changed(self, previous_state: bool, current_state: bool):
+        """
+        Handle motion state changes from motion detection manager
+        
+        Args:
+            previous_state: Previous motion detection state
+            current_state: Current motion detection state
+        """
+        print(f"[Camera Stream] Motion state changed: {previous_state} -> {current_state}")
+        
+        if current_state and not previous_state:
+            # Motion started - begin new recording
+            print("[Camera Stream] Motion STARTED - Beginning new recording")
+            if self.is_recording:
+                # Stop current recording before starting new one
+                self._stop_recording()
+            self._start_recording()
+            
+        elif not current_state and previous_state:
+            # Motion ended (after 10s cooldown) - stop recording
+            print("[Camera Stream] Motion ENDED - Stopping recording")
+            if self.is_recording:
+                self._stop_recording()
+    
+    def update_motion_status(self, motion_data):
+        """
+        Update motion detection status from external source
+        
+        Args:
+            motion_data: Motion detection results
+        """
+        self.motion_detected = motion_data.get('motion_detected', False)
+        self.motion_boxes = motion_data.get('boxes', [])
+        self.motion_confidence = motion_data.get('confidence', 0.0)
+        
+        # Note: Recording is now handled by motion state change callbacks
+        # This ensures each motion detection event gets its own recording
+        
+        self._update_motion_indicator()
+    
+    def _update_motion_indicator(self):
+        """Update the motion indicator in the GUI"""
+        if hasattr(self, 'motion_indicator'):
+            if self.motion_detected:
+                # Calculate percentage from 0-1 range to 0-100%
+                confidence_percent = self.motion_confidence * 100
+                recording_status = " [RECORDING]" if self.is_recording else ""
+                self.motion_indicator.config(
+                    text=f"● MOTION DETECTED ({confidence_percent:.1f}%){recording_status}",
+                    fg="#27ae60"  # Green for motion detected
+                )
+                print(f"[Camera Stream] Motion indicator updated: DETECTED ({confidence_percent:.1f}%){recording_status}")
+            else:
+                self.motion_indicator.config(
+                    text="● No Motion",
+                    fg="#95a5a6"  # Gray for no motion
+                )
+                print("[Camera Stream] Motion indicator updated: NO MOTION")
+    
+    def _start_recording(self):
+        """Start video recording when motion is detected"""
+        if self.current_frame is None:
+            print("[Camera Stream] Cannot start recording - no current frame available")
+            return
+            
+        try:
+            # Generate timestamp-based filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.current_recording_filename = f"motion_{timestamp}.mp4"
+            video_path = os.path.join(self.recordings_folder, self.current_recording_filename)
+            
+            # Get frame dimensions
+            height, width = self.current_frame.shape[:2]
+            
+            # Initialize video writer with MP4 codec
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            self.video_writer = cv2.VideoWriter(video_path, fourcc, 20.0, (width, height))
+            
+            if self.video_writer.isOpened():
+                self.is_recording = True
+                self.recording_start_time = datetime.now()
+                print(f"[Camera Stream] Started recording: {self.current_recording_filename}")
+            else:
+                print(f"[Camera Stream] Failed to initialize video writer for {video_path}")
+                self.video_writer = None
+                
+        except Exception as e:
+            print(f"[Camera Stream] Error starting recording: {e}")
+            self._stop_recording()
+    
+    def _stop_recording(self):
+        """Stop video recording and save file"""
+        if self.is_recording and self.video_writer:
+            try:
+                # Ensure all frames are written before releasing
+                self.video_writer.release()
+                self.is_recording = False
+                
+                if self.recording_start_time:
+                    duration = datetime.now() - self.recording_start_time
+                    print(f"[Camera Stream] Recording stopped: {self.current_recording_filename} (Duration: {duration.total_seconds():.1f}s)")
+                else:
+                    print(f"[Camera Stream] Recording stopped: {self.current_recording_filename}")
+                    
+                # Clear all recording references
+                self.video_writer = None
+                self.recording_start_time = None
+                filename = self.current_recording_filename
+                self.current_recording_filename = None
+                
+                # Force garbage collection to ensure file is fully released
+                import gc
+                gc.collect()
+                
+                print(f"[Camera Stream] Video file released and ready to view: {filename}")
+                
+            except Exception as e:
+                print(f"[Camera Stream] Error stopping recording: {e}")
+        
+        # Reset recording state completely
+        self.is_recording = False
+        self.video_writer = None
+        self.recording_start_time = None
+        self.current_recording_filename = None
+    
+    def _write_frame_to_recording(self, frame):
+        """Write current frame to active recording"""
+        if self.is_recording and self.video_writer and self.video_writer.isOpened():
+            try:
+                self.video_writer.write(frame)
+            except Exception as e:
+                print(f"[Camera Stream] Error writing frame to recording: {e}")
+                self._stop_recording()
+    
+    # TODO: Add Motion Detection Methods (keeping for future enhancements)
     def process_frame_for_motion(self, frame):
         """
         Process frame for motion detection with advanced algorithms
@@ -455,26 +636,8 @@ class CameraStreamManager:
             tuple: (processed_frame, motion_data)
                    motion_data contains: boxes, confidence, stabilized_frame
         """
-        # TODO: Implement advanced motion detection
-        # - Background subtraction for motion detection
-        # - Camera shake compensation using optical flow
-        # - Noise filtering to reduce false positives from wind
-        # - Object tracking for persistent motion areas
-        # - Confidence scoring for motion quality
-        pass
-    
-    def update_motion_status(self, motion_data):
-        """
-        Update motion detection status in GUI
-        
-        Args:
-            motion_data: Motion detection results
-        """
-        # TODO: Update motion indicator boolean
-        # - Set motion_detected flag based on confidence threshold
-        # - Update motion_indicator label color (green/gray)
-        # - Update motion confidence display
-        # - Trigger motion notification if needed
+        # This is now handled by the MotionDetectionManager
+        # Keeping for potential future enhancements
         pass
     
     def draw_motion_boxes(self, frame, motion_boxes):
@@ -488,15 +651,17 @@ class CameraStreamManager:
         Returns:
             frame: Frame with motion boxes drawn
         """
-        # TODO: Draw bounding boxes around motion areas
-        # - Use different colors for different confidence levels
-        # - Add motion vector arrows for direction
-        # - Include timestamp and confidence text overlays
+        # This is now handled by the MotionDetectionManager
+        # Keeping for potential future enhancements
         pass
     
     def cleanup(self):
         """Clean up resources"""
         self.stop_stream()
+        
+        # Stop motion detection if connected
+        if self.motion_detection_manager:
+            self.motion_detection_manager.stop_detection()
         
         # TODO: Cleanup motion detection resources
         # - Stop motion detection thread
